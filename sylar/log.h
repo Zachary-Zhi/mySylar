@@ -2,63 +2,100 @@
 #define __SYLAR_LOG_H__
 
 #include <bits/stdint-uintn.h>
+#include <fstream>
 #include <string>
 #include <stdint.h>
 #include <memory>
 #include <list>
+#include <sstream>
+#include <fstream>
+#include <vector>
 namespace sylar{
 
-// ÈÕÖ¾ÊÂ¼ş
+class Logger;
+class LogFormatter;
+
+// æ—¥å¿—äº‹ä»¶
 class LogEvent {
 public:
     typedef std::shared_ptr<LogEvent> ptr;
-    LogEvent();
+    LogEvent(const char* file, int32_t m_line, uint32_t elapse, uint32_t thread_id, 
+        uint32_t fiber_id, uint64_t time);
+    const char* getFile() const { return m_file;}
+    int32_t getLine() const { return m_line; }
+    uint32_t getElapse() const { return m_elapse; }
+    uint32_t getThreadId() const { return m_threadId; }
+    uint32_t getFiberId() const { return m_fiberId; }
+    uint64_t getTime() const { return m_time; }
+    const std::string getContent() const { return m_ss.str(); }
+    std::stringstream& getSS() { return m_ss; }
+
 private:
-    const char* m_file = nullptr; // ÎÄ¼şÃû
-    int32_t m_line = 0; // ĞĞºÅ
-    uint32_t m_elapse = 0; // ³ÌĞòÆô¶¯¿ªÊ¼µ½ÏÖÔÚµÄºÁÃëÊı
-    uint32_t m_threadId = 0; // Ïß³Ìid
-    uint32_t m_fiberId = 0; // Ğ­³Ìid
-    uint64_t m_time; // Ê±¼ä´Á
-    std::string m_content; // 
+    const char* m_file = nullptr; // æ–‡ä»¶å
+    int32_t m_line = 0; //è¡Œå·
+    uint32_t m_elapse = 0; // ç¨‹åºå¯åŠ¨å¼€å§‹åˆ°ç°åœ¨çš„æ¯«ç§’æ•°
+    uint32_t m_threadId = 0; // çº¿ç¨‹ID
+    uint32_t m_fiberId = 0; // åç¨‹ID
+    uint64_t m_time; // æ—¶é—´æˆ³
+    std::stringstream m_ss; // 
 };
 
-// ÈÕÖ¾¼¶±ğ
+// æ—¥å¿—çº§åˆ«
 class LogLevel {
 public:
     enum Level{
+        UNKNOW = 0,
         DEBUG = 1,
         INFO = 2,
         WARN = 3,
         ERROR = 4,
         FATAL = 5
     };
+
+    static const char* ToString(LogLevel::Level level);
 };
 
-// ÈÕÖ¾¸ñÊ½Æ÷
+// æ—¥å¿—æ ¼å¼åŒ–
 class LogFormatter{
 public:
     typedef std::shared_ptr<LogFormatter> ptr;
-    std::string format(LogEvent::ptr evnet);
-private:
+    LogFormatter(const std::string& pattern);
+    std::string format(std::shared_ptr<Logger> ptr, LogLevel::Level level, LogEvent::ptr evnet);
+public:
+    class FormatItem{
+    public:
+        typedef std::shared_ptr<FormatItem> ptr;
+        virtual ~FormatItem(){}
+        virtual void format(std::ostream& os, std::shared_ptr<Logger> ptr, LogLevel::Level level, LogEvent::ptr event) = 0;    
+    };
 
+    void init();
+private:
+    std::string m_pattern;
+    std::vector<FormatItem::ptr> m_items;
 };
 
 
-// ÈÕÖ¾Êä³öµØ
+// æ—¥å¿—è¾“å‡ºåœ°
 class LogAppender{
 public:
     typedef std::shared_ptr<LogAppender> ptr;
     virtual ~LogAppender(){}
-    void log(LogLevel::Level level, LogEvent::ptr event);
-private:
-    LogLevel::Level m_level;
+    virtual void log(std::shared_ptr<Logger> logger, LogLevel::Level level, LogEvent::ptr event) = 0;
+    void setFormatter(LogFormatter::ptr val) {
+        m_formatter = val;
+    }
 
+    LogFormatter::ptr getFormatter() { return m_formatter; }
+
+protected:
+    LogLevel::Level m_level = LogLevel::Level::DEBUG;
+    LogFormatter::ptr m_formatter;
 };
 
 
-// ÈÕÖ¾Êä³öÆ÷
-class Logger{
+// æ—¥å¿—å™¨
+class Logger: public std::enable_shared_from_this<Logger>{
 public:
     typedef std::shared_ptr<Logger> ptr;
     
@@ -75,21 +112,35 @@ public:
     void delAppender(LogAppender::ptr appender);
     LogLevel::Level getLevel() const {return m_level;}
     void setLevel(LogLevel::Level level) {m_level = level;}
+    const std::string& getName() const { return m_name;}
 private:
-    std::string m_name; // ÈÕÖ¾Ãû³Æ
-    LogLevel::Level m_level; // ÈÕÖ¾¼¶±ğ
-    std::list<LogAppender::ptr> m_appenders; // Appender¼¯ºÏ
+    std::string m_name; // æ—¥å¿—åç§°
+    LogLevel::Level m_level; // æ—¥å¿—çº§åˆ«
+    std::list<LogAppender::ptr> m_appenders; // Appenderé›†åˆ
+    LogFormatter::ptr m_formatter;
 
 };
 
-// Êä³öµ½¿ØÖÆÌ¨µÄAppender
+// è¾“å‡ºåˆ°æ§åˆ¶å°çš„Appender
 class StdoutLogAppender: public LogAppender {
-
+public:
+    typedef std::shared_ptr<StdoutLogAppender> ptr;
+    void log(std::shared_ptr<Logger> ptr, LogLevel::Level level, LogEvent::ptr event) override;
+private:
 };
 
-// ¶¨ÒåÊä³öµ½ÎÄ¼şµÄAppender
+// å®šä¹‰è¾“å‡ºåˆ°æ–‡ä»¶çš„Appender
 class FileLogAppender: public LogAppender {
+public:
+    typedef std::shared_ptr<FileLogAppender> ptr;
+    FileLogAppender(const std::string& filename);
+    void log(std::shared_ptr<Logger> ptr, LogLevel::Level level, LogEvent::ptr event) override;
 
+    // é‡æ–°æ‰“å¼€æ–‡ä»¶ï¼Œæ–‡ä»¶æ‰“å¼€æˆåŠŸè¿”å›true
+    bool reopen();
+private:
+    std::string m_filename;
+    std::ofstream m_filestream;
 };
 
 
